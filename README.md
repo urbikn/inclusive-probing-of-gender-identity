@@ -7,5 +7,7 @@ The dataset folder contains scripts for recreating the TRANsCRIPT corpus. It inc
 
 ### Experiments Folder
 The experiments folder is dedicated to running experiments on PLMs. It contains two main components:
-    - **Probing**: The `probing.py` script includes code for probing the PLMs representations. As an input it uses the representations created from the `probing/dataset.py` script, either frozen or author-controlled using SAGE.
-    - **Fine-Tuning**: The `fine_tuning.py` script is responsible for fine-tuning language models.
+
+- **Probing**: The `probing.py` script includes code for probing the PLMs representations. As an input it uses the representations created from the `probing/dataset.py` script, either frozen or author-controlled using SAGE.
+
+- **Fine-Tuning**: The `fine_tuning.py` script is responsible for fine-tuning language models.
