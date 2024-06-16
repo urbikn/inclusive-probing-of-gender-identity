@@ -11,14 +11,56 @@ from datasets import Dataset, DatasetDict, concatenate_datasets
 import torch
 from torch.utils.data import Dataset, DataLoader
 import spacy
-import variation
+import variation as analysis
 
 CACHE_DIR = "__models__"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+def main():
+    model_list = "roberta-base,roberta-large".split(",") + \
+        "microsoft/deberta-base,microsoft/deberta-large".split(",") + \
+        "microsoft/deberta-v3-base,microsoft/deberta-v3-large,microsoft/deberta-v3-xsmall,microsoft/deberta-v3-small".split(",")
+
+    group_name_list = [
+        'cis-gender',
+        'trans_and_non-binary'
+    ]
+
+    # Arg parse that gets index for model and dataset group
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('--model', type=int, default=0, help='Index of the model to use:' + str(model_list))
+    argparser.add_argument('--group', type=int, default=0, help='Index of the dataset group to use:\n' + str(group_name_list))
+    argparser.add_argument('--batch_size', type=int, default=64, help='Batch size for extracting embeddings')
+    argparser.add_argument('--dataset_path', type=str, help='Path to dataset')
+    argparser.add_argument('--save_to', type=str, default=False, help='Path to save the embeddings to')
+    argparser.add_argument('--controlled', type=bool, default=False, help='Whether to use controlled probing')
+    args = argparser.parse_args()
+
+    model_name = model_list[args.model]
+    dataset_group_name = group_name_list[args.group]
+    batch_size = args.batch_size
+
+    # TODO: add 'controlled' parameter
+    embedding_class = Embeddings(model_name=model_name, dataset_group_name=dataset_group_name, controlled=args.controlled, dataset_path=args.dataset_path)
+
+    print(f'Using model {model_name} and dataset group {dataset_group_name}')
+
+    ## === Load dataset ===
+    balanced_dataset = datasets.load_from_disk(args.dataset_path)
+
+
+    # === Extract embeddings ===
+    dataset = balanced_dataset.map(embedding_class.tokenize, batched=True, desc="Tokenize")
+    dataset = embedding_class.extract_embeddings(dataset, batch_size=batch_size)
+
+    # Only keep the embeddings
+    dataset = dataset.select_columns('embedding')
+
+    # === Save dataset ===
+    dataset.save_to_disk(args.save_to)
 
 class Embeddings():
-    def __init__(self, model_name, dataset_group_name='cis-gender', controlled=False, dataset_path) -> None:
+    def __init__(self, model_name, dataset_group_name='cis-gender', controlled=False, dataset_path="") -> None:
         self.model_name = model_name
         self.group_name = dataset_group_name
 
@@ -29,7 +71,7 @@ class Embeddings():
         self.controlled=controlled
 
         if self.controlled:
-            dataset = analysis.load_data(save_cache='dataset_new.pkl', dataset_path=dataset_path, n_process=16, batch_size=100)"
+            dataset = analysis.load_data(save_cache='dataset_new.pkl', dataset_path=dataset_path, n_process=16, batch_size=100)
             variation_model = analysis.LinguisticVariationPerUser(dataset)
 
             user_ids = dataset['user_id'].unique()
@@ -163,43 +205,4 @@ class Embeddings():
 
 
 if __name__ == '__main__':
-
-    model_list = "roberta-base,roberta-large".split(",") + \
-        "microsoft/deberta-base,microsoft/deberta-large".split(",") + \
-        "microsoft/deberta-v3-base,microsoft/deberta-v3-large,microsoft/deberta-v3-xsmall,microsoft/deberta-v3-small".split(",")
-
-    group_name_list = [
-        'cis-gender',
-        'trans_and_non-binary'
-    ]
-
-    # Arg parse that gets index for model and dataset group
-    argparser = argparse.ArgumentParser()
-    argparser.add_argument('--model', type=int, default=0, help='Index of the model to use:' + str(model_list))
-    argparser.add_argument('--group', type=int, default=0, help='Index of the dataset group to use:\n' + str(group_name_list))
-    argparser.add_argument('--batch_size', type=int, default=64, help='Batch size for extracting embeddings')
-    argparser.add_argument('--dataset_path', type=str, help='Path to dataset')
-    args = argparser.parse_args()
-
-    model_name = model_list[args.model]
-    dataset_group_name = group_name_list[args.group]
-    batch_size = args.batch_size
-
-    # TODO: add 'controlled' parameter
-    embedding_class = Embeddings(model_name=model_name, dataset_group_name=dataset_group_name)
-
-    print(f'Using model {model_name} and dataset group {dataset_group_name}')
-
-    ## === Load dataset ===
-    balanced_dataset = datasets.load_from_disk(args.dataset_path)
-
-
-    # === Extract embeddings ===
-    dataset = balanced_dataset.map(embedding_class.tokenize, batched=True, desc="Tokenize")
-    dataset = embedding_class.extract_embeddings(dataset, batch_size=batch_size)
-
-    # Only keep the embeddings
-    dataset = dataset.select_columns('embedding')
-
-    # === Save dataset ===
-    dataset.save_to_disk(f'datasets/{embedding_class.group_name}.{embedding_class.model_name}')
+    main()

@@ -1,4 +1,4 @@
-    import numpy as np
+import numpy as np
 import sage.sage as sage
 from collections import Counter
 import numpy as np
