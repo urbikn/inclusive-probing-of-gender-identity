@@ -304,8 +304,8 @@ class WikiDataUsers(WikiDataAPI):
 
 if __name__ == "__main__":
     wikidata = WikiDataUsers()
-
-    gender_identities = ['transfemale', 'transmale', 'non-binary']
+    
+    gender_identities = ['trans woman', 'trans man', 'non-binary']
 
     # Get all YouTubers
     json_path, user_ids = wikidata.youtubers_to_json(gender_identities)
