@@ -11,27 +11,51 @@ from datasets import Dataset, DatasetDict, concatenate_datasets
 import torch
 from torch.utils.data import Dataset, DataLoader
 import spacy
+import variation
 
 CACHE_DIR = "__models__"
-FILEPATH_OF_REPRESENTATIVE_ITEMS = '../../variation_analysis/results/per_user_representative_items_threshold_1_norm.json'
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class Embeddings():
-    def __init__(self, model_name, dataset_group_name='cis-gender') -> None:
+    def __init__(self, model_name, dataset_group_name='cis-gender', controlled=False, dataset_path) -> None:
         self.model_name = model_name
         self.group_name = dataset_group_name
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=CACHE_DIR, use_fast=False) # Need to set use_fast to False to avoid error from pre-tokenized data
         self.model = AutoModel.from_pretrained(model_name, cache_dir=CACHE_DIR).to(device)
-
         self.spacy_nlp = spacy.load('en_core_web_md', exclude=['ner', 'textcat'])
 
-        with open(FILEPATH_OF_REPRESENTATIVE_ITEMS, 'r') as f:
-            self.representative_terms_per_user = json.load(f)
-        
-        self.overall_tokens = 0
-        self.masked_tokens = 0
+        self.controlled=controlled
+
+        if self.controlled:
+            dataset = analysis.load_data(save_cache='dataset_new.pkl', dataset_path=dataset_path, n_process=16, batch_size=100)"
+            variation_model = analysis.LinguisticVariationPerUser(dataset)
+
+            user_ids = dataset['user_id'].unique()
+            user_most_representative = []
+
+            for target_user_id in tqdm(user_ids):
+                variation_model.run_sage(user_id=target_user_id)
+                representative_items = variation_model.most_representative_target_words(beta_threshold=1)
+                user_most_representative.append(representative_items)
+
+            results = {}
+            for user_id, representative_items in zip(user_ids, user_most_representative):
+                if len(representative_items) == 0:
+                    continue
+
+                words = list(np.array(representative_items)[:, 0].astype(str))
+                coef = list(np.array(representative_items)[:, 1].astype(float).round(4))
+
+                results[user_id] = {
+                    'words': words,
+                    'coef': coef
+                }
+
+            self.representative_terms_per_user = results
+
+
         
 
     def __postprocess_embeddings(self, embedding, special_tokens_mask):
@@ -43,42 +67,52 @@ class Embeddings():
         return single_embedding
 
     def tokenize(self, examples):
-        text_examples = []
+        if not self.controlled:
+            tokenized_examples = self.tokenizer(
+                text_examples, padding="max_length",
+                truncation=True, return_tensors="pt",
+                max_length=512, is_split_into_words=False,
+                return_special_tokens_mask=True
+            )
+        else:
 
-        # Mask the representative terms in the text
-        # - to do this, we first tokenize the text and then replace the tokens that are representative terms with the mask token
-        for i, tokens in enumerate(self.spacy_nlp.pipe(examples['text'])):
-            user_id = examples['user_id'][i]
-            representative_terms = self.representative_terms_per_user.get(user_id, {'words': []})['words']
+            text_examples = []
 
-            self.overall_tokens += len(tokens)
-            mask_indexes = []
-            for i, token in enumerate(tokens):
-                if token.lemma_.lower() in representative_terms:
-                    self.masked_tokens += 1
-                    mask_indexes.append(i)
-            
-            tokens = [token.text if i not in mask_indexes else self.tokenizer.mask_token for i, token in enumerate(tokens)]
-            text_examples.append(tokens)
+            # Mask the representative terms in the text
+            # - to do this, we first tokenize the text and then replace the tokens that are representative terms with the mask token
+            for i, tokens in enumerate(self.spacy_nlp.pipe(examples['text'])):
+                user_id = examples['user_id'][i]
+                representative_terms = self.representative_terms_per_user.get(user_id, {'words': []})['words']
 
-        tokenized_examples = self.tokenizer(
-            text_examples, padding="max_length",
-            truncation=True, return_tensors="pt",
-            max_length=512, is_split_into_words=True,
-            return_special_tokens_mask=True
-        )
+                self.overall_tokens += len(tokens)
+                mask_indexes = []
+                for i, token in enumerate(tokens):
+                    if token.lemma_.lower() in representative_terms:
+                        self.masked_tokens += 1
+                        mask_indexes.append(i)
+                
+                tokens = [token.text if i not in mask_indexes else self.tokenizer.mask_token for i, token in enumerate(tokens)]
+                text_examples.append(tokens)
 
-        # Because there were instances where the mask token was not recognized as a special token, 
-        # we manually set the special tokens mask
-        for i in range(len(examples)):
-            input_ids = tokenized_examples['input_ids'][i]
-            special_tokens_mask  = tokenized_examples['special_tokens_mask'][i]
+            tokenized_examples = self.tokenizer(
+                text_examples, padding="max_length",
+                truncation=True, return_tensors="pt",
+                max_length=512, is_split_into_words=True,
+                return_special_tokens_mask=True
+            )
 
-            for l, input_id in enumerate(input_ids):
-                if input_id == self.tokenizer.mask_token_id:
-                    special_tokens_mask[l] = 1
-            
-            tokenized_examples['special_tokens_mask'][i] = special_tokens_mask
+            # Because there were instances where the mask token was not recognized as a special token, 
+            # we manually set the special tokens mask
+            for i in range(len(examples)):
+                input_ids = tokenized_examples['input_ids'][i]
+                special_tokens_mask  = tokenized_examples['special_tokens_mask'][i]
+
+                for l, input_id in enumerate(input_ids):
+                    if input_id == self.tokenizer.mask_token_id:
+                        special_tokens_mask[l] = 1
+                
+                tokenized_examples['special_tokens_mask'][i] = special_tokens_mask
+
 
         return tokenized_examples
 
@@ -125,7 +159,7 @@ class Embeddings():
             dataset = dataset.add_column('embedding', embeddings.tolist())
 
         return dataset
-
+    
 
 
 if __name__ == '__main__':
@@ -144,66 +178,24 @@ if __name__ == '__main__':
     argparser.add_argument('--model', type=int, default=0, help='Index of the model to use:' + str(model_list))
     argparser.add_argument('--group', type=int, default=0, help='Index of the dataset group to use:\n' + str(group_name_list))
     argparser.add_argument('--batch_size', type=int, default=64, help='Batch size for extracting embeddings')
+    argparser.add_argument('--dataset_path', type=str, help='Path to dataset')
     args = argparser.parse_args()
 
     model_name = model_list[args.model]
     dataset_group_name = group_name_list[args.group]
     batch_size = args.batch_size
+
+    # TODO: add 'controlled' parameter
     embedding_class = Embeddings(model_name=model_name, dataset_group_name=dataset_group_name)
 
     print(f'Using model {model_name} and dataset group {dataset_group_name}')
 
     ## === Load dataset ===
-    num_examples = 6478
-
-    file_path = f'../datasets/{embedding_class.group_name}.{num_examples}'
-
-    # Check if directory exists
-    if not os.path.exists(file_path):
-        # Then create it
-        dataset_filepath = f'../../../data/processed/topic_filtered/{embedding_class.group_name}/segment_256_with_metadata.csv'
-        if not os.path.exists(dataset_filepath):
-            raise ValueError(f'Dataset file {dataset_filepath} does not exist')
-
-        dataset = pd.read_csv(dataset_filepath, sep='|')
-        dataset.columns = ['text', 'label', 'user_id', 'doc_id', 'topic_id']
-
-        dataset = datasets.Dataset.from_pandas(dataset)
-
-        # Sample equal number of examples from each class
-        def sample_examples(dataset, N_samples):
-            sorted_dataset = dataset.sort("label")
-            unique_labels = set(sorted_dataset['label'])
-            datasets_by_label = {label: sorted_dataset.filter(lambda x: x['label'] == label) for label in unique_labels}
-
-            sampled_datasets = [dataset.shuffle(seed=12).select(range(N_samples)) for dataset in datasets_by_label.values()]
-            balanced_dataset = concatenate_datasets(sampled_datasets)
-
-            return balanced_dataset
-
-        balanced_dataset = sample_examples(dataset, num_examples)
-
-        # Split into train/val/test sets with 80/10/10 split
-        train_test_dataset = balanced_dataset.train_test_split(test_size=0.2, seed=12)
-        val_test_dataset = train_test_dataset['test'].train_test_split(test_size=0.5, seed=12)
-
-        # Combine the splits into a DatasetDict
-        balanced_dataset= DatasetDict({
-            'train': train_test_dataset['train'],
-            'validation': val_test_dataset['train'],
-            'test': val_test_dataset['test'] 
-        })
-
-        # Save the dataset
-        balanced_dataset.save_to_disk(file_path)
-    else:
-        print(f'Loading dataset from disk')
-        balanced_dataset = datasets.load_from_disk(file_path)
+    balanced_dataset = datasets.load_from_disk(args.dataset_path)
 
 
     # === Extract embeddings ===
     dataset = balanced_dataset.map(embedding_class.tokenize, batched=True, desc="Tokenize")
-    print('Num. overall tokens:', embedding_class.overall_tokens, 'Num. masked tokens:', embedding_class.masked_tokens)
     dataset = embedding_class.extract_embeddings(dataset, batch_size=batch_size)
 
     # Only keep the embeddings
