@@ -7,8 +7,6 @@ This repository contains code associated with the paper Gender Identity in Pretr
 
 ## Getting started
 
-This provided instruction on recreating the TRANsCRIPT dataset allong with running all the probing experiments on PLMs.
-
 ### Installation
 
 Clone the repository, create a virtual environment, and install the requirements:
