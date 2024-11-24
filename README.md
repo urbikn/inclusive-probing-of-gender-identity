@@ -53,5 +53,17 @@ The experiments folder is dedicated to running experiments on PLMs. It contains 
 If you use this code in your research, please use the following citation from the [ACL Anthology](https://aclanthology.org/):
 
 ```
-TBA
+@inproceedings{knuples-etal-2024-gender,
+    title = "Gender Identity in Pretrained Language Models: An Inclusive Approach to Data Creation and Probing",
+    author = "Knuple{\v{s}}, Urban  and
+      Falenska, Agnieszka  and
+      Mileti{\'c}, Filip",
+    booktitle = "Findings of the Association for Computational Linguistics: EMNLP 2024",
+    month = nov,
+    year = "2024",
+    address = "Miami, Florida, USA",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2024.findings-emnlp.680",
+    pages = "11612--11631"
+}
 ```
